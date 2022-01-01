@@ -71,7 +71,8 @@ do(State) ->
     spawn(fun() ->
             listen_on_project_apps(State),
             Extensions = get_extensions(State),
-            ?MODULE:auto(Extensions)
+	    Exclusions = get_exclusions(State),
+            ?MODULE:auto({Extensions, Exclusions})
         end),
     State1 = remove_from_plugin_paths(State),
     rebar_prv_shell:do(State1).
@@ -83,7 +84,10 @@ get_extensions(State) ->
     ExtraExtensions = rebar_state:get(State, extra_extensions, []),
     [unicode:characters_to_binary(Ext) || Ext <- ExtraExtensions] ++ ?VALID_EXTENSIONS_DEFAULT.
 
-auto(Extensions) ->
+get_exclusions(State) ->
+    rebar_state:get(State, auto_exclusions, []).
+
+auto({Extensions, Exclusions}) ->
     case whereis(rebar_agent) of
         undefined ->
             timer:sleep(100);
@@ -91,7 +95,8 @@ auto(Extensions) ->
         _ ->
             receive 
                 {ChangedFile, _Events} ->
-                    Ext = filename:extension(unicode:characters_to_binary(ChangedFile)),
+		    Filename = unicode:characters_to_binary(ChangedFile),
+                    Ext = filename:extension(Filename),
                     IsValid = lists:any(
                         fun(ValidExt) ->
                             RE = <<ValidExt/binary, "$">>,
@@ -105,7 +110,12 @@ auto(Extensions) ->
                         end,
                         Extensions
                     ),
-                    case IsValid of
+		    IsMoreValid = lists:any(
+				    fun(Excluded) ->
+					    Filename =/= Excluded
+				    end,
+				    Exclusions),
+                    case IsValid and IsMoreValid of
                         false -> pass;
                         true ->
                             % sleep here so messages can bottle up
